@@ -7,91 +7,80 @@ decode(Bin,Selector) ->
 		
 		%proplist -> decode_in_proplist(Bin,<<>>);   
 		
-		map -> decode_in_map(Bin,maps:new(),0)   
+		map -> decode_in_map(Bin,<<>>,<<>>,empty,[],0)   
 
 	end.
 
+ 
 
-%decode_in_proplist(Bin,Acc)->
-    
-  %  case Bin of 
-    
-  %  <<>> -> 
-   % 	Acc;
 
-   % << "}", _>> ->
-   	%	Acc	; 
+decode_in_map(<<"{", Rest/binary>>,K_Acc,V_Acc,KvAccCondition,Acc,BracketCnt)->
+          decode_in_map( Rest ,K_Acc,V_Acc,KvAccCondition,Acc,BracketCnt+1);
 
-     %<< "{" , Rest/binary >> ->                   
-	%		decode_in_proplist(Rest, Bin); 
+%decode_in_map(<<"}", Rest/binary>>,KvAcc,V_AccKvAccCondition,Acc,BracketCnt)->
+         % decode_in_map( Rest ,K_Acc,V_AccKvAccCondition,Acc,BracketCnt-1);
+
+ 
+          
+decode_in_map(_,_,_,empty,Acc,0) ->
+          Acc;
+
+decode_in_map(Bin,_,_,empty,Acc,BracketCnt)->  %Вытаскиваем ключ
+		 [H, T] = binary:split(Bin, <<":">>, []),
+          decode_in_map(T,H, <<>>,krawbin,Acc,BracketCnt);
+
+decode_in_map(Bin,<<"'", KVRest/binary>>,V_Acc,krawbin,Acc,BracketCnt)-> % преобразуем и добавляем ключ в аккумулятор ключа 
+		 [H, _] = binary:split(KVRest, <<"'">>, []),
+          decode_in_map(Bin,binary_to_list(H),V_Acc,krawbin,Acc,BracketCnt);          
+
+decode_in_map(<<"'", Rest/binary>>,K_Acc,_,krawbin,Acc,BracketCnt)->  %Вытаскиваем значения для ключа если текст
+		 [H, T] = binary:split(Rest, <<"'">>, []),
+          decode_in_map( T,<<>>,vrawbin,maps:put(K_Acc,binary_to_list(H),Acc),BracketCnt);  
+
+
+			  
+decode_in_map(<<",", Rest/binary>> ,K_Acc,V_Acc,vrawbin,Acc,BracketCnt)  ->  %Вытаскиваем значения для соотв ключа если не текст 
+   if
+	    is_atom(V_Acc) ->
+	      decode_in_map(Rest,<<>>,<<>>,empty,maps:put(K_Acc,binary_to_atom(V_Acc,utf8),Acc),BracketCnt); 
+	    is_list(V_Acc)->  
+	       decode_in_map(Rest,<<>>,<<>>,empty,maps:put(K_Acc,binary_to_list(V_Acc),Acc),BracketCnt); 
+	    is_number(V_Acc)->  
+	      decode_in_map(Rest,<<>>,<<>>,empty,maps:put(K_Acc,binary_to_integer(V_Acc),Acc),BracketCnt) 
+   end;
+		   
+
+
+decode_in_map(<< "}", Rest/binary>>,K_Acc,V_Acc,vrawbin,Acc,BracketCnt)  ->  %Вытаскиваем значения для соотв ключа если не текст 
+
+		  if
+	    is_atom(V_Acc) ->
+	      decode_in_map(Rest,<<>>,<<>>,empty,maps:put(K_Acc,binary_to_atom(V_Acc,utf8),Acc),BracketCnt-1); 
+	    is_list(V_Acc)->  
+	       decode_in_map(Rest,<<>>,<<>>,empty,maps:put(K_Acc,binary_to_list(V_Acc),Acc),BracketCnt-1); 
+	    is_number(V_Acc)->  
+	      decode_in_map(Rest,<<>>,<<>>,empty,maps:put(K_Acc,binary_to_integer(V_Acc),Acc),BracketCnt-1) 
+		end;
+
+
 
 	
-   %<< "'", K,"':", Val/integer , Rest/binary>>  ->
-		%decode_in_proplist(Rest, [{K,Val}|Acc]);
-   %<< "'", K,"':'", Val, "'," , Rest/binary>> when  is_list(K), is_list(Val)->
-	%	{K,Val}
 
-		% decode_in_proplist(Rest, [{K,Val}|Acc])
+decode_in_map(<<C/utf8, Rest/binary>>,K_Acc,V_Acc,vrawbin,Acc,BracketCnt) ->      
+	decode_in_map(Rest,K_Acc,<<V_Acc,C>>,vrawbin,Acc,BracketCnt).	 
 
+ 
 
-   % end.
+       %when C /= "{" and C /= "[" 
+  
 
-decode_in_map(Bin,Acc,N)->
-
-       case Bin of
-      <<>> -> 	
-	 		Acc ;
-
-	<< "}", Rest/binary >> ->                   
-			decode_in_map(Rest,Acc,N-1); 
-
-	<< "{", Rest/binary >> ->                   
-			decode_in_map(Rest,Acc,N+1); 
-	%<< ",", Rest/binary >> ->                   
-		%	decode_in_map(Rest,Acc,N); 
-
-	
-
-        
-
-    <<"'", Rest/binary>> ->
-	        [Key, K_rest] = binary:split(Rest, <<"':">>, []),
-
-	        [Value, V_rest] = binary:split(K_rest, <<",">>, []),
-	           if
-	           	is_atom(Value) ->
-	           		  decode_in_map(V_rest, maps:put(Key , binary_to_atom (Value, utf8), Acc), N);
-
-	           	is_list(Value)->  
-	           		decode_in_map(V_rest, maps:put(Key , binary_to_list(Value), Acc), N);
-
-	           	is_number(Value)->  
-	           		decode_in_map(V_rest, maps:put(Key , list_to_integer(binary_to_list(Value)), Acc), N);
-
-	           		true ->
-
-	                                 [Value, V_rest] = binary:split(K_rest, <<"'">>, []),
-	                                 [_,Value1] = <<"'", Value/binary>>,
-	                                 decode_in_map(V_rest, maps:put(Key , Value1, Acc), N)
-
-	          end
-
-		
-
-
-
-
-        end.    
-
-
-	%ex()->
+ 
 	%  decode(<<"{'squadName':'Super hero squad','homeTown':'Metro City'}">>,map)
-		%Var = <<"{'squadName':'Super hero squad','homeTown':'Metro City','formed': 2016,
-%'secretBase':'Super tower','active': true}">>.
+		%Var = <<"{'squadName':'Super hero squad','homeTown':'Metro City','formed': 2016, secretBase':'Super tower','active': true,}">>.
    %bs04:decode (Var, map).
 
 
 %[Key, K_rest] = binary:split(<<"squadName':'Super hero squad'">>, <<"':'">>, []).
 
 
-%
+ 
