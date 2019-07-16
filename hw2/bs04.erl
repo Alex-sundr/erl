@@ -1,86 +1,46 @@
 -module(bs04).
 -export([decode/2 ]).
 
+-record(jsonkv, {list = <<>>, key=[], value =[], raw = <<>>,flag}).
+
+
 decode(Bin,Selector) ->
 
 	case Selector of
 		
 		%proplist -> decode_in_proplist(Bin,<<>>);   
 		
-		map -> decode_in_map(Bin,<<>>,<<>>,empty,[],0)   
+		map ->  json(#jsonkv{raw = Bin, flag = key},<<>>,#{})  
 
 	end.
 
- 
+json(RAW ,_, Map) when RAW#jsonkv.raw == <<>> ->
+       Map;    
 
-
-decode_in_map(<<"{", Rest/binary>>,K_Acc,V_Acc,KvAccCondition,Acc,BracketCnt)->
-          decode_in_map( Rest ,K_Acc,V_Acc,KvAccCondition,Acc,BracketCnt+1);
-
-%decode_in_map(<<"}", Rest/binary>>,KvAcc,V_AccKvAccCondition,Acc,BracketCnt)->
-         % decode_in_map( Rest ,K_Acc,V_AccKvAccCondition,Acc,BracketCnt-1);
-
- 
-          
-decode_in_map(_,_,_,empty,Acc,0) ->
-          Acc;
-
-decode_in_map(Bin,_,_,empty,Acc,BracketCnt)->  %Вытаскиваем ключ
-		 [H, T] = binary:split(Bin, <<":">>, []),
-          decode_in_map(T,H, <<>>,krawbin,Acc,BracketCnt);
-
-decode_in_map(Bin,<<"'", KVRest/binary>>,V_Acc,krawbin,Acc,BracketCnt)-> % преобразуем и добавляем ключ в аккумулятор ключа 
-		 [H, _] = binary:split(KVRest, <<"'">>, []),
-          decode_in_map(Bin,binary_to_list(H),V_Acc,krawbin,Acc,BracketCnt);          
-
-decode_in_map(<<"'", Rest/binary>>,K_Acc,_,krawbin,Acc,BracketCnt)->  %Вытаскиваем значения для ключа если текст
-		 [H, T] = binary:split(Rest, <<"'">>, []),
-          decode_in_map( T,<<>>,vrawbin,maps:put(K_Acc,binary_to_list(H),Acc),BracketCnt);  
-
-
-			  
-decode_in_map(<<",", Rest/binary>> ,K_Acc,V_Acc,vrawbin,Acc,BracketCnt)  ->  %Вытаскиваем значения для соотв ключа если не текст 
-   if
-	    is_atom(V_Acc) ->
-	      decode_in_map(Rest,<<>>,<<>>,empty,maps:put(K_Acc,binary_to_atom(V_Acc,utf8),Acc),BracketCnt); 
-	    is_list(V_Acc)->  
-	       decode_in_map(Rest,<<>>,<<>>,empty,maps:put(K_Acc,binary_to_list(V_Acc),Acc),BracketCnt); 
-	    is_number(V_Acc)->  
-	      decode_in_map(Rest,<<>>,<<>>,empty,maps:put(K_Acc,binary_to_integer(V_Acc),Acc),BracketCnt) 
-   end;
-		   
-
-
-decode_in_map(<< "}", Rest/binary>>,K_Acc,V_Acc,vrawbin,Acc,BracketCnt)  ->  %Вытаскиваем значения для соотв ключа если не текст 
-
-		  if
-	    is_atom(V_Acc) ->
-	      decode_in_map(Rest,<<>>,<<>>,empty,maps:put(K_Acc,binary_to_atom(V_Acc,utf8),Acc),BracketCnt-1); 
-	    is_list(V_Acc)->  
-	       decode_in_map(Rest,<<>>,<<>>,empty,maps:put(K_Acc,binary_to_list(V_Acc),Acc),BracketCnt-1); 
-	    is_number(V_Acc)->  
-	      decode_in_map(Rest,<<>>,<<>>,empty,maps:put(K_Acc,binary_to_integer(V_Acc),Acc),BracketCnt-1) 
-		end;
-
-
-
-	
-
-decode_in_map(<<C/utf8, Rest/binary>>,K_Acc,V_Acc,vrawbin,Acc,BracketCnt) ->      
-	decode_in_map(Rest,K_Acc,<<V_Acc,C>>,vrawbin,Acc,BracketCnt).	 
+json(RAW, KeyVal, Map)  ->
+       <<H/utf8,Rest/binary>> = RAW#jsonkv.raw,
+       %io:format([H]),  
+  case  H of
+      
+  	 "{"  ->  json(#jsonkv{raw=Rest},<<>>,Map),  io:format("${") ; %запускаем новый
+  	 "'"  ->  json(RAW#jsonkv{raw=Rest},KeyVal,Map);%кавычку игнорируем 
+     
+     ","  ->   case RAW#jsonkv.flag of
+            key ->  json(RAW#jsonkv{raw=Rest, key = KeyVal, flag = val, value = <<>>},<<>>,Map), io:format([KeyVal]);
+            list ->json(RAW#jsonkv{raw=Rest},<<KeyVal,H>>,Map);
+            val ->  json(RAW#jsonkv{raw=Rest, key = <<>>, flag = key, value = <<>>},<<>>,#{RAW#jsonkv.key => KeyVal})
+             end;                 
+                                           % добавляем следующий ключ 
+     ":"  ->  json (RAW#jsonkv{raw = Rest,flag = val,key = KeyVal},<<>>,Map); % ищем значение 
+     "}"  ->  case RAW#jsonkv.flag of
+            key ->  json(RAW#jsonkv{raw=Rest, key = KeyVal, flag = val, value = <<>>},<<>>,Map),io:format(Map);
+            list ->json(RAW#jsonkv{raw=Rest},<<KeyVal,H>>,Map), io:format(Map);
+            val ->  json(RAW#jsonkv{raw=Rest, key = <<>>, flag = val, value = <<>>},<<>>,#{RAW#jsonkv.key => KeyVal}), io:format(Map)
+             end;         % ищем значение 
+   	 H   ->  json(RAW#jsonkv{raw = Rest}, <<KeyVal/binary,H/utf8>>,Map)%, io:format([KeyVal])  %Добавляем символ к ключу 
+    
+     
+  end.
 
  
 
-       %when C /= "{" and C /= "[" 
-  
-
- 
-	%  decode(<<"{'squadName':'Super hero squad','homeTown':'Metro City'}">>,map)
-		%Var = <<"{'squadName':'Super hero squad','homeTown':'Metro City','formed': 2016, secretBase':'Super tower','active': true,}">>.
-   %bs04:decode (Var, map).
-
-
-%[Key, K_rest] = binary:split(<<"squadName':'Super hero squad'">>, <<"':'">>, []).
-
-
- 
